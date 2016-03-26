@@ -1,12 +1,14 @@
 # coding: utf-8
 import requests
 import json
+import io
+import time
 import os.path
 
 global DEBUG
 global DB
 
-DEBUG = True
+DEBUG = False
 DB = './db.json'
 key_file = '/home/uj/dev/apis/keys.json'
 if os.path.isfile(key_file): #TODO: Gérer file not found
@@ -51,7 +53,7 @@ class FeaturedGames():
         else:
             req = "https://euw.api.pvp.net/observer-mode/rest/featured?api_key=" + API_KEYS['lol']
             self.games = requests.get(req).json()
-        #print self.games['gameList']
+        self.client_refresh_interval = self.games['clientRefreshInterval']
         for game in self.games['gameList']:
             if game['gameMode'] == 'CLASSIC' and game['gameType'] == 'MATCHED_GAME':
                 print "ID de game : %s" % game['gameId']
@@ -62,6 +64,8 @@ class FeaturedGames():
                     self.participant_list.append(Participant(participant['championId'], participant['summonerName'].encode('utf-8')))
     def get_participants(self):
         return self.participant_list
+    def get_client_refresh_interval(self):
+        return self.client_refresh_interval
 class Db():
     def __init__(self):
         db_path = 'db.json'
@@ -78,9 +82,10 @@ class Db():
         # else:
         #     self.champion_entries[participant.get_champion_id()] = ChampionEntry(participant.get_champion_id(), participant.get_summoner_name())
         if participant.get_champion_id() in self.champion_entries:
-            tmp = self.champion_entries[participant.get_champion_id()]
-            tmp.append(participant.get_summoner_name())
-            self.champion_entries[participant.get_champion_id()] = tmp
+            tmp = self.champion_entries[participant.get_champion_id()]#TODO: CLEAN THIS MESS
+            if not(participant.get_summoner_name() in tmp):
+                tmp.append(participant.get_summoner_name())
+                self.champion_entries[participant.get_champion_id()] = tmp
         else:
             self.champion_entries[participant.get_champion_id()] = [participant.get_summoner_name()]
     def display_all(self):
@@ -90,8 +95,33 @@ class Db():
     def display_names(self, champion_id):
         for name in self.champion_entries[str(champion_id)].get_summoner_name():
             print(name)
-    def get_champion_entries(self):
-        return self.champion_entries
+    def save(self):
+        with io.open('db.json', 'w') as f:
+            f.write(unicode(json.dumps(self.champion_entries)))
+        return json.dumps(self.champion_entries)
+    def load(self):
+        if os.path.isfile('db.json'):
+            with io.open('db.json', 'r') as f:
+                self.champion_entries = json.loads(f.read())
+
+class Monitor():
+    def __init__(self):
+        self.champions = Champions()
+        self.db = Db()
+        self.db.load()
+    def process_games(self, number):
+        print("Processing de %s gamesets." % number)
+        for i in xrange(0, number):
+            print("Gameset %s" % i)
+            featured = FeaturedGames()
+            for participant in featured.get_participants():
+                self.db.add_participant(participant)
+            self.db.save()
+            print("Waiting %s seconds" % featured.get_client_refresh_interval())
+            time.sleep(featured.get_client_refresh_interval())
+        # with io.open('db.json', 'w', encoding='utf-8') as f:
+        #     f.write(unicode(json.dumps(self.champion_entries, ensure_ascii=False)))
+        # return json.dumps(self.champion_entries)
 # class db():
 #     def __init__(self):
 #         if os.path.isfile(db): #TODO: Gérer file not found
@@ -99,16 +129,18 @@ class Db():
 #             self.db = json.loads(db_file.read())
 #
 #champions = Champions()
-featured_games = FeaturedGames()
-db = Db()
-part = featured_games.get_participants()
-for parti in part:
-    db.add_participant(parti)
-
-db.display_all()
-
-ce = ChampionEntry(1, "Supersuceur")
-print(json.dumps(ce.__dict__))
+monitor = Monitor()
+monitor.process_games(5)
+# featured_games = FeaturedGames()
+# db = Db()
+# part = featured_games.get_participants()
+# for parti in part:
+#     db.add_participant(parti)
+# print(db.load())
+# for participant in featured_games.get_participants():
+#     db.add_participant(participant)
+# print(db.save())
+#print(json.dumps(ce.__dict__))
 #print champions.get_champion(str(2))
 # print "URL of the request, getting basic information"
 # url = "https://global.api.pvp.net/api/lol/static-data/na/v1.2/champion?dataById=true&api_key=" + API_KEYS['lol']
